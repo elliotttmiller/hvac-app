@@ -1,0 +1,7 @@
+{
+  "name": "Copy of HVAC Compliance Engine",
+  "description": "A professional liability shield for HVAC engineering. Automates Manual J/S/D calculations using AI vision and physics-based auditing.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
