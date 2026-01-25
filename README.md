@@ -1,20 +1,89 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# HVAC Compliance Engine: Professional Engineering Pipeline
 
-# Run and deploy your AI Studio app
+## 1. Executive Summary
+The **HVAC Compliance Engine** is a high-fidelity automation platform designed for mechanical contractors and engineering firms to streamline the production of **ACCA Manual J, S, D, and T** submittals. By leveraging the **Gemini 2.5/3 Pro Vision** capabilities and a deterministic physics engine, the platform transforms raw architectural blueprints into jurisdictional-ready engineering packages.
 
-This contains everything you need to run your app locally.
+## 2. Core Engineering Philosophy
+This application operates on a "Trust but Verify" architecture. It utilizes AI for the labor-intensive task of architectural data extraction (transcribing room schedules, exterior wall lengths, and glazing ratios) but delegates the high-stakes thermal calculations to a **Deterministic Physics Engine** that strictly adheres to the ACCA 8th Edition standards.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1csN0VaUshDquVWL99sddastQXolGLr49
+### The Four Pillars of Compliance:
+*   **Manual J (Load Calculation):** Peak heating and cooling loads are calculated per building zone using real-world orientation and climate data.
+*   **Manual S (Equipment Selection):** Equipment is matched based on the total cooling load, ensuring the selection falls within the 95%–115% capacity window (125% for variable speed).
+*   **Manual D (Duct Design):** Branch and trunk sizing using friction rate analysis, available static pressure (ASP), and total equivalent length (TEL).
+*   **Manual T (Air Distribution):** Register selection based on terminal velocity targets (50 FPM) to ensure acoustic and thermal comfort.
 
-## Run Locally
+---
 
-**Prerequisites:**  Node.js
+## 3. Technical Architecture
 
+### Frontend Stack
+- **Framework:** React 19 (ES6+ Modules)
+- **Styling:** Tailwind CSS (Professional "Blueprint" Aesthetic)
+- **Icons:** Lucide React
+- **Document Rendering:** PDF-lib & HTML2Canvas
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### AI Strategy (@google/genai)
+- **Vision Ingestion:** Uses `gemini-3-flash-preview` to rasterize multi-page PDFs and reconcile overlapping architectural zones into a unified geometric schedule.
+- **Reasoning Hub:** Normalizes messy architectural wall types into physical U-Values and R-Values for the physics engine.
+- **Grounding Tool:** Employs `googleSearch` to find real-world HVAC equipment inventory, ensuring Manual S matches are based on currently available manufacturer datasheets.
+
+### Deterministic Physics Engine (`/services`)
+- **`manualJEngine.ts`**: Handles thermal transmission, solar gains, and infiltration physics.
+- **`manualSEngine.ts`**: Validates equipment capacity ratios against design loads.
+- **`manualDEngine.ts`**: Calculates duct diameters and velocities using friction rate logic.
+- **`manualTEngine.ts`**: Estimates throw and exit velocities for diffusers.
+
+---
+
+## 4. Key Features
+
+### 1. Multi-Page Vision Pipeline
+Unlike standard OCR, this engine rasterizes full PDF sets at 2.0x scale to preserve fine-line architectural details. It reconciles data across floor plans, elevations, and window schedules to build a "Single Source of Truth."
+
+### 2. Live Engineering Audit
+The "Manual Calcs" dashboard provides a transparent look at the physics core. Users can toggle between J, S, D, and T views to see how specific room geometries directly impact duct sizing and register velocity.
+
+### 3. High-Fidelity PDF Export
+The submittal engine uses a custom-built rasterization pipeline to generate 8.5" x 11" US Letter submittal sheets. These sheets include:
+- Architectural Zone Summaries
+- Thermal Component Pie Charts
+- Certified Manual S Statements
+- Duct Branch Sizing Schedules
+
+---
+
+## 5. Directory Structure
+```text
+.
+├── components/
+│   ├── FinalReport.tsx          # PDF Sheet construction & Export Engine
+│   ├── ManualCalculations.tsx   # Dashboard for J/S/D/T Audit
+│   ├── PipelineOrchestrator.tsx # Root Navigation & State Management
+│   ├── StageIngestion.tsx       # PDF Rasterization & Vision Pipeline
+│   └── StagePhysics.tsx         # Calculation Logic Orchestration
+├── services/
+│   ├── geminiService.ts         # API integration for Vision & Grounding
+│   ├── manualJEngine.ts         # Thermal Physics Core
+│   ├── manualSEngine.ts         # Sizing Compliance Logic
+│   ├── manualDEngine.ts         # Duct Engineering Logic
+│   └── manualTEngine.ts         # Air Distribution Logic
+├── types.ts                     # Strict TypeScript interfaces for Load Data
+└── App.tsx                      # Main Entrypoint
+```
+
+## 6. Liability & Compliance Disclaimer
+**CRITICAL:** This application is an engineering aid, not a substitute for professional design. 
+1. **AI Disclaimer:** All architectural data inferred by AI must be field-verified.
+2. **PE Requirement:** Results generated by this engine **must** be reviewed and stamped by a Licensed Professional Engineer (PE) before jurisdictional submittal.
+3. **Standards:** Calculations are intended to follow ACCA guidelines but local code amendments may vary.
+
+---
+
+## 7. Setup & Installation
+The application requires a valid `API_KEY` provided via the environment.
+1. Ensure the `process.env.API_KEY` is configured for the `@google/genai` SDK.
+2. The app automatically handles PDF worker initialization via `pdfjs-dist`.
+3. High-speed internet is required for Google Search Grounding during the Equipment Selection (Manual S) phase.
+
+---
+*Developed for the next generation of high-performance mechanical design.*
