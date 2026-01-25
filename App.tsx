@@ -1,8 +1,9 @@
+
 import React from 'react';
-import { PipelineOrchestrator } from './components/PipelineOrchestrator';
+import { Workspace } from './components/Workspace';
 
 const App: React.FC = () => {
-  return <PipelineOrchestrator />;
+  return <Workspace />;
 };
 
 export default App;
