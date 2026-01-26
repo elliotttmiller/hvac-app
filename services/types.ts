@@ -8,7 +8,7 @@ export interface ZoneLabel {
 }
 
 export interface DiscoveryResult {
-  layout_reasoning: string; // NEW: The "Brain" of the operation
+  layout_reasoning: string;
   scaleText: string | null;
   zones: ZoneLabel[];
 }

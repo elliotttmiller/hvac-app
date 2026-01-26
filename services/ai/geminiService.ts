@@ -6,8 +6,8 @@ import { SYSTEM_PROMPTS } from './prompts';
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // CONFIGURATION
-const VISION_MODEL = 'gemini-2.5-flash'; // Recommended for best spatial reasoning
-const LOGIC_MODEL = 'gemini-2.5-flash'; // Recommended for speed/math
+const VISION_MODEL = 'gemini-2.5-flash'; 
+const LOGIC_MODEL = 'gemini-2.5-flash'; 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 2000;
 
@@ -110,9 +110,6 @@ const AnnotationSchema = z.object({
 
 // --- HELPER: FAULT TOLERANCE (RETRY LOGIC) ---
 
-/**
- * Wraps the Google AI generateContent call with exponential backoff for 503/Overloaded errors.
- */
 async function generateContentWithRetry(
     modelName: string, 
     contents: Content[], 
@@ -140,11 +137,10 @@ async function generateContentWithRetry(
             const isOverloaded = error.message?.includes('overloaded') || error.code === 503 || error.status === 'UNAVAILABLE';
             
             if (isOverloaded && attempt < MAX_RETRIES) {
-                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // 2s, 4s, 8s
-                log(`[AI Service] Model ${modelName} overloaded. Retrying in ${delay}ms (Attempt ${attempt}/${MAX_RETRIES})...`);
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                log(`[AI Service] ⚠️ Model ${modelName} overloaded. Retrying in ${delay}ms (Attempt ${attempt}/${MAX_RETRIES})...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
-                // If it's not an overload error, or we ran out of retries, throw it.
                 throw error;
             }
         }
@@ -200,7 +196,6 @@ async function discoverZoneLabels(imageParts: Part[], log: (msg: string) => void
     const prompt: Part = { text: SYSTEM_PROMPTS.PROMPT_DISCOVER_ZONES };
     const contents: Content[] = [{ role: 'user', parts: [...imageParts, prompt] }];
     
-    // Use Retry Wrapper
     const responseText = await generateContentWithRetry(VISION_MODEL, contents, discoverySchema, log);
     
     const rawJson = JSON.parse(responseText);
@@ -219,7 +214,6 @@ async function analyzeZoneBatch(imageParts: Part[], zoneBatch: ZoneLabel[], log:
     const prompt: Part = { text: SYSTEM_PROMPTS.PROMPT_ANALYZE_ZONE_BATCH(zoneBatch) };
     const contents: Content[] = [{ role: 'user', parts: [...imageParts, prompt] }];
 
-    // Use Retry Wrapper
     const responseText = await generateContentWithRetry(VISION_MODEL, contents, batchAnalysisSchema, log);
 
     const rawJson = JSON.parse(responseText) as ZoneAnnotation[];
@@ -288,7 +282,6 @@ async function runDataCalculator(annotations: AnnotationResult, log: (msg: strin
   const prompt: Part = { text: SYSTEM_PROMPTS.DATA_CALCULATOR_PROMPT(JSON.stringify(annotations)) };
   const contents: Content[] = [{ role: 'user', parts: [prompt] }];
 
-  // Use Retry Wrapper
   const responseText = await generateContentWithRetry(LOGIC_MODEL, contents, calculatorSchema, log);
 
   const rawJson = JSON.parse(responseText);
