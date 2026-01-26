@@ -43,7 +43,8 @@ export const VisionTakeoffResultSchema = z.object({
     name: z.string().min(1, "Room name cannot be empty"),
     area: z.number().gt(0, "Room area must be greater than zero"), 
     windows: z.number().optional(),
-    orientation: z.string().optional()
+    orientation: z.string().optional(),
+    isConditioned: z.boolean().optional() // ADDED: Unambiguous conditioning flag
   })).min(1, "The rooms array cannot be empty. Vision AI failed to detect conditioned zones."),
   construction: z.object({
     wallType: z.string().optional(),
