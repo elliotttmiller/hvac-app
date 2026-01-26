@@ -1,4 +1,3 @@
-
 import { ManualJInput, ManualJOutput, AEDExcursion, OrientationLoad, ClimateConditions } from '../../types';
 
 const PSYCH = {
@@ -11,12 +10,6 @@ const SOLAR_PEAK_GAINS: Record<number, Record<string, number>> = {
   30: { N: 37, NE: 114, E: 202, SE: 198, S: 110, SW: 198, W: 202, NW: 114, Horizontal: 262 },
   40: { N: 39, NE: 108, E: 216, SE: 200, S: 106, SW: 200, W: 216, NW: 108, Horizontal: 258 },
   50: { N: 39, NE: 100, E: 219, SE: 195, S: 104, SW: 195, W: 219, NW: 100, Horizontal: 246 }
-};
-
-const CLTD_BASE = {
-  WALL: 20,
-  ROOF: 35,
-  DOOR: 20
 };
 
 export class ManualJEngine {
@@ -116,6 +109,7 @@ export class ManualJEngine {
       coolingSensible,
       coolingLatent,
       totalCooling,
+      coolingLoad: totalCooling, // Key alignment for UI
       heatingCFM,
       coolingCFM,
       breakdown: Object.entries(output.heating.breakdown).map(([k, v]) => ({ component: k, heating: v, cooling: output.cooling.breakdown[k] || 0 })),
@@ -124,24 +118,18 @@ export class ManualJEngine {
   }
 
   public static calculateAED(input: ManualJInput): AEDExcursion {
-    const { envelope, physics, climate } = input as any; // Cast to avoid strict type issues with missing fields in interface vs implementation
-    // Re-deriving envelope/physics/climate from input structure in reference
-    // Reference input has: design, surfaces, infiltration...
-    
+    const { design, surfaces } = input; 
     const fullCalc = this.calculate(input);
-    const solarFactor = this.getSolarGainFactor(input.design.latitude, input.design.orientation);
-    
-    // Find window area from surfaces
-    const windows = input.surfaces.filter(s => s.type === 'window');
+    const solarFactor = this.getSolarGainFactor(design.latitude, design.orientation);
+    const windows = surfaces.filter(s => s.type === 'window');
     const windowArea = windows.reduce((a, b) => a + b.area, 0);
-    const windowSHGC = windows.length > 0 ? windows[0].shgc : 0.3; // Approx
+    const windowSHGC = windows.length > 0 ? windows[0].shgc || 0.3 : 0.3;
 
     const peakGlassLoad = windowArea * windowSHGC * solarFactor;
     const baseCoolingLoad = fullCalc.totalCooling - peakGlassLoad;
 
     const hourlyLoads: number[] = [];
     let totalGlazingLoad = 0;
-    
     for (let hour = 0; hour < 24; hour++) {
        const sunIntensity = Math.max(0, Math.sin(((hour - 7) / 13) * Math.PI));
        const hourlyGlassLoad = peakGlassLoad * sunIntensity;
@@ -163,13 +151,10 @@ export class ManualJEngine {
 
   public static calculateMultiOrientation(input: ManualJInput): OrientationLoad[] {
     const directions: Array<'N'|'NE'|'E'|'SE'|'S'|'SW'|'W'|'NW'> = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    
     return directions.map(dir => {
-      const tempInput: ManualJInput = JSON.parse(JSON.stringify(input));
+      const tempInput = JSON.parse(JSON.stringify(input));
       tempInput.design.orientation = dir;
-
       const result = this.calculate(tempInput);
-
       return {
         direction: dir,
         sensible: result.coolingSensible,

@@ -1,4 +1,64 @@
-// types.ts
+import { z } from "zod";
+
+// --- NEW AI Vision Pipeline Data Structures ---
+
+export interface ZoneLabel {
+  roomName: string;
+  labelCoordinates: { x: number; y: number };
+}
+
+export interface DiscoveryResult {
+  layout_reasoning: string; // NEW: The "Brain" of the operation
+  scaleText: string | null;
+  zones: ZoneLabel[];
+}
+
+export interface ZoneAnnotation {
+  roomName: string;
+  boundingBox: [number, number, number, number]; // [xmin, ymin, xmax, ymax]
+  dimensionsText?: string | null;
+  reasoning?: string;
+}
+
+export interface AnnotationResult {
+  scaleAnnotation?: {
+    text?: string;
+    pixelLength?: number;
+    pixelsPerFoot?: number;
+  };
+  rooms: ZoneAnnotation[];
+  windows?: {
+    boundingBox: [number, number, number, number];
+  }[];
+}
+
+export const VisionTakeoffResultSchema = z.object({
+  vision_reasoning: z.string().optional(),
+  math_trace: z.string().optional(),
+  metadata: z.object({
+    jobName: z.string().optional(),
+    client: z.string().optional()
+  }).optional(),
+  rooms: z.array(z.object({
+    name: z.string().min(1, "Room name cannot be empty"),
+    area: z.number().gt(0, "Room area must be greater than zero"), 
+    windows: z.number().optional(),
+    orientation: z.string().optional()
+  })).min(1, "The rooms array cannot be empty. Vision AI failed to detect conditioned zones."),
+  construction: z.object({
+    wallType: z.string().optional(),
+    windowType: z.string().optional()
+  }).optional(),
+  totalEnvelope: z.object({
+     conditionedFloorArea: z.number().gt(50, "Total area too small")
+  }),
+  error: z.string().optional()
+});
+
+export type VisionTakeoffResult = z.infer<typeof VisionTakeoffResultSchema>;
+
+
+// --- Core Application State & Engineering Data Structures ---
 
 export interface ProjectState {
   id: string;
@@ -22,7 +82,7 @@ export interface ProjectState {
   };
   status: 'COMPLETE';
   processingMetrics?: { calculationTime: number };
-  visionRawData?: any; // Stores raw JSON from AI Vision pipeline for auditing
+  visionRawData?: AnnotationResult;
 }
 
 export interface ProjectMetadata {

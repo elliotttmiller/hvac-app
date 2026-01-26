@@ -1,16 +1,19 @@
+// components/layout/Header.tsx
 
 import React from 'react';
-import { Wind, RefreshCcw } from 'lucide-react';
+import { Wind, RefreshCcw, Terminal } from 'lucide-react';
 
 interface HeaderProps {
   jobId?: string;
   onReset?: () => void;
+  onDebugClick?: () => void;
   centerContent?: React.ReactNode;
   rightContent?: React.ReactNode;
   title?: string; // Fallback legacy prop
+  hasLogs?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ jobId, onReset, centerContent, rightContent, title }) => {
+export const Header: React.FC<HeaderProps> = ({ jobId, onReset, onDebugClick, centerContent, rightContent, title, hasLogs }) => {
   return (
     <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 transition-all duration-300 print:hidden h-24">
       <div className="max-w-[1800px] mx-auto px-6 h-full flex items-center justify-between relative">
@@ -41,6 +44,17 @@ export const Header: React.FC<HeaderProps> = ({ jobId, onReset, centerContent, r
 
         {/* RIGHT: ACTIONS OR JOB INFO */}
         <div className="flex items-center gap-4 min-w-[200px] justify-end">
+          {hasLogs && onDebugClick && (
+            <button 
+              onClick={onDebugClick}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-all mr-2"
+              title="View Live AI Logs"
+            >
+              <Terminal className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-widest">Logs</span>
+            </button>
+          )}
+
           {rightContent ? (
             rightContent
           ) : jobId ? (

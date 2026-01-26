@@ -1,79 +1,99 @@
-// backend/ai/prompts.ts
+import { ZoneLabel } from '../types';
 
-export const KNOWLEDGE_BASE = {
-  uValues: {
-    "2x6 Wood Stud, R-19": 0.048,
-    "2x4 Wood Stud, R-13": 0.077,
-    "Standard Double Pane Window": 0.55,
-    "High-Performance Double Pane Window": 0.30,
-    "Standard Roof, R-38": 0.03,
-    "Standard Door": 0.20,
-    "Slab Floor, R-10": 0.04
-  },
-  shgc: {
-    "Standard": 0.40,
-    "Low Solar Gain": 0.25,
-  },
-  designTemps: {
-    "Minneapolis, MN": { winter: -17, summer: 92, dailyRange: 'M', latitude: 45, elevation: 872 },
+export interface SystemPromptsType {
+  PROMPT_DISCOVER_ZONES: string;
+  PROMPT_ANALYZE_ZONE_BATCH: (zoneBatch: ZoneLabel[]) => string;
+  DATA_CALCULATOR_PROMPT: (annotationJson: string) => string;
+}
 
-  }
-};
-
-export const SYSTEM_PROMPTS = {
+export const SYSTEM_PROMPTS: SystemPromptsType = {
   /**
-   * REBUILT: This prompt now performs a full visual takeoff, not just text extraction.
+   * Stage 1A: Discovery (Visual Chain of Thought)
    */
-  VISION_EXTRACTION: `
-    SYSTEM TASK: AI-POWERED HVAC TAKEOFF & ANALYSIS (WRIGHTSOFT PARITY)
+  PROMPT_DISCOVER_ZONES: `
+    SYSTEM TASK: ARCHITECTURAL DISCOVERY (VISUAL REASONING MODE)
+    You are an expert AI OCR Engineer. Your goal is to build a precise mental model of the floor plan before extracting data.
 
-    You are a world-class mechanical estimator with 30 years of experience. Your task is to perform a full "takeoff" from a sequence of architectural drawing images. You must analyze the visual geometry, not just the text.
+    **STEP 1: VISUAL SCAN (Mental Scratchpad)**
+    -   Scan the image from Top-Left to Bottom-Right.
+    -   Identify the "Bedroom Wing" (usually a cluster of rooms).
+    -   **VERTICAL STACK CHECK:** Look specifically for rooms stacked vertically (North-to-South) that share the same wall alignment.
+    -   *Crucial:* If you see a column of rooms, read the label of the TOP room, then the MIDDLE room, then the BOTTOM room. Do NOT assume they are the same just because they are the same size.
+    -   *Verify:* Are there unique numbers? (e.g., #4, #6, #5, #3). If yes, they are DISTINCT zones.
 
-    **CHAIN OF THOUGHT (Follow these steps precisely):**
-
-    1.  **ESTABLISH SCALE (CRITICAL):**
-        -   Scan all pages for a written scale (e.g., 'SCALE: 1/4" = 1'-0"').
-        -   If found, calculate the pixels-per-foot ratio.
-        -   If not found, find a dimensioned object (like a 3'0" door) and measure its pixel width to infer the scale.
-        -   State the scale you are using in your output. This is non-negotiable.
-
-    2.  **PERFORM VISUAL TAKEOFF (AGGREGATE FOR THE ENTIRE HOUSE):**
-        -   **Total Conditioned Floor Area (sq ft):** Trace the interior boundary of all conditioned spaces and sum their areas.
-        -   **Total Exterior Wall Area (sq ft):** Trace the entire thermal envelope (exterior walls). Measure the total linear footage, then multiply by the typical ceiling height (assume 9ft if not specified).
-        -   **Total Window Area (sq ft):** Identify every window on the exterior walls. Measure the width and height of each, calculate its area, and sum them all.
-        -   **Total Exterior Door Area (sq ft):** Do the same for all exterior doors.
-        -   **Total Roof Area (sq ft):** This is typically the same as the total floor area of the top-most conditioned floor.
-
-    3.  **EXTRACT PROJECT METADATA (From Title Blocks):**
-        -   Find "Job Name", "Client Name", "Designer Name", "Plan Name", and "Date".
-
-    4.  **EXTRACT ROOM SCHEDULE (Text-Based):**
-        -   Find the room schedule table if it exists. Extract the Name and Area for each room as a list. This is a secondary source to verify your visual takeoff.
-
-    **OUTPUT REQUIREMENTS:**
-    -   Return a SINGLE, valid JSON object.
-    -   All measurements must be in feet or square feet.
-    -   Be precise. Your output is the direct input for a physics engine.
-  `,
-  
-  LOGIC_NORMALIZATION: (knowledgeBase: string, projectContext: string) => `
-    ROLE: Senior HVAC Reasoning Engine
-    TASK: Translate the visual takeoff data from the Vision AI into a perfectly structured 'ManualJInput' object for our deterministic physics engine.
-
-    REFERENCE KNOWLEDGE BASE:
-    ${knowledgeBase}
+    **STEP 2: EXTRACTION (Data Generation)**
+    -   **Scale:** Locate explicit scale text (e.g., "SCALE: 1/4\" = 1'-0\"").
+    -   **Zones:** Extract the label for every DISTINCT physical room identified in Step 1.
     
-    INCOMING PROJECT CONTEXT (from Vision AI Takeoff):
-    ${projectContext}
+    **INTELLIGENCE RULES:**
+    1.  **Strict Grounding:** Only output a room if you can read its specific label text.
+    2.  **Anti-Hallucination:** Do not infer sequential rooms. If you see "Bedroom 3", do not create "Bedroom 4" unless you see the text "Bedroom 4".
+    3.  **Spatial Clustering:** Combine "MASTER", "BEDROOM", and dimensions into ONE label.
+    4.  **Noise Filtering:** Ignore "ATTIC ACCESS", "JOISTS", "HEADER".
 
-    INSTRUCTIONS:
-    1.  **POPULATE ENVELOPE:** Use the aggregated takeoff values (totalWallArea, totalWindowArea, etc.) to populate the 'envelope' object.
-    2.  **APPLY PHYSICS:** Using the Knowledge Base, select appropriate U-Values for a standard new construction home in the specified location.
-    3.  **DETERMINE CLIMATE:** Based on the project location, select the correct design temperatures and latitude from the Knowledge Base. Set indoor temps to 70F winter, 75F summer.
-    4.  **DEFINE INTERNALS & SYSTEMS:** Set occupancy to (number of bedrooms + 1, or 3 if unknown). Assume standard internal loads. Assume ducts are in a 'conditioned' space with R-8 insulation and calculate duct surface area as 25% of the total floor area. Set air changes (ACH) to 0.35.
-
-    OUTPUT: Return a valid JSON object matching the 'ManualJInput' interface precisely.
+    **OUTPUT FORMAT (JSON):**
+    {
+      "layout_reasoning": "I see a vertical stack of 4 bedrooms on the right side...",
+      "scaleText": "1/4\" = 1'-0\"", 
+      "zones": [ ... ]
+    }
   `,
 
-  PROCUREMENT_SEARCH: (cooling: number, heating: number) => `...` // Unchanged
+  /**
+   * Stage 1B: Batched Analysis (Geometric Verification)
+   */
+  PROMPT_ANALYZE_ZONE_BATCH: (zoneBatch: ZoneLabel[]) => `
+    SYSTEM TASK: FOCUSED BATCH ZONE ANALYSIS
+    You are an expert Architectural Blueprint Analyst.
+    
+    **INPUT BATCH:**
+    ${JSON.stringify(zoneBatch, null, 2)}
+
+    **INSTRUCTIONS:**
+    1.  Locate each zone on the blueprint.
+    2.  **CRITICAL:** Trace the **INTERIOR WALL BOUNDARIES**. Do not just draw a box around the text label. The box must represent the physical floor area.
+    3.  **READ DIMENSIONS CAREFULLY:** 
+        -   Look closely at the dimension text (e.g., "12'-4\\" x 12'-11\\"").
+        -   **Common OCR Errors:** Do not confuse "11" with "8", or "4" with "1".
+        -   *Self-Correction:* If the text looks like "11'-8"" but the room is visually square (12x12), re-read the text. It might be "11'-11"" or "12'-11"".
+    4.  If no dimension text is found, return null.
+    5.  Provide a brief "reasoning" string.
+
+    **OUTPUT:** JSON array of analysis objects.
+  `,
+
+  /**
+   * Stage 2: Calculator (Logic Filtering)
+   */
+  DATA_CALCULATOR_PROMPT: (annotationJson: string) => `
+    SYSTEM TASK: HVAC TAKEOFF CALCULATOR (LOGIC & MATH)
+    You are a data processing engine. Calculate square footage and filter conditioned space.
+
+    **GIVEN ANNOTATION DATA:**
+    ${annotationJson}
+
+    **EXECUTION STEPS (Follow Precisely in 'math_trace'):**
+
+    1.  **STEP 1: ANALYZE SCALE**
+        -   Derive the true scale by comparing a room's 'dimensionsText' to its 'boundingBox' pixel width.
+        -   Use this Derived Scale for all calculations.
+
+    2.  **STEP 2: CALCULATE AREA & CONDITIONING**
+        -   For each room, calculate Area = (Width_px / Scale) * (Height_px / Scale).
+        -   **DETERMINE CONDITIONING:**
+            -   **Unconditioned (Exclude):** Garage, Patio, Porch, Deck, Attic, Crawlspace.
+            -   **Conditioned (Include):** Living, Sleeping, Hygiene, Cooking, Storage, Circulation.
+
+    3.  **STEP 3: SANITY CHECK (The "Anti-Clone" Filter)**
+        -   Look for suspicious patterns:
+            -   Are there multiple rooms with **EXACTLY** the same area (down to the decimal)?
+            -   Are there sequential rooms (BDRM 4, BDRM 5) that seem unlikely for this size of home?
+        -   **ACTION:** If you find 3+ rooms with *identical* areas and names like "BDRM #3", "BDRM #4", "BDRM #5", assume they are hallucinations/clones. **Count only ONE of them.**
+
+    4.  **STEP 4: AGGREGATE TOTALS**
+        -   Sum the area of **ONLY** the unique, Conditioned rooms.
+        -   **CRITICAL:** Do NOT include Unconditioned areas in 'totalConditionedFloorArea'.
+
+    OUTPUT: Return the single, complete JSON object.
+  `
 };

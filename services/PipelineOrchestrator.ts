@@ -1,108 +1,101 @@
-// backend/services/PipelineOrchestrator.ts
-
-import { ProjectState, Room, EquipmentDetails, ManualJInput } from '../types';
-import { extractTakeoffFromPDF, normalizeDataForPhysics, fetchEquipmentScenarios } from './ai/geminiService';
-import { ManualJEngine } from './engines/manualJEngine';
+import { ProjectState } from '../types';
+import { runVisionStage } from './ai/geminiService';
 import { rasterizePdfToParts } from './pdfProcessor';
-import { Part } from '@google/genai';
 
 export class PipelineOrchestrator {
-  public static async execute(file: File): Promise<ProjectState> {
+  public static async execute(file: File, onLog?: (msg: string) => void): Promise<ProjectState> {
+    const log = (msg: string) => { onLog?.(msg); console.log(msg); };
     const projectId = 'ccip-' + Math.random().toString(36).substr(2, 9);
-    const startTime = Date.now();
-    console.log(`[Orchestrator] Starting pipeline for project: ${projectId}`);
+    
+    log(`[Orchestrator] Initializing Vision-Only Pipeline: ${projectId}`);
+    log(`[Orchestrator] CONFIG: Physics Engines (Manual J/S/D) are DISABLED.`);
+    
+    try {
+      // --- STAGE 1: INGESTION ---
+      log(`[Ingestion] Processing ${file.name}...`);
+      const fileBuffer = await file.arrayBuffer();
+      const imageParts = await rasterizePdfToParts(fileBuffer);
+      log(`[Ingestion] Rasterization complete. Generated ${imageParts.length} high-fidelity viewports.`);
+      
+      // --- STAGE 2: VISION INFERENCE ---
+      log(`[Vision] Sending to AI Vision Pipeline...`);
+      const visionResult = await runVisionStage(imageParts, onLog);
 
-    // --- STAGE 1: INGESTION & VISUAL TAKEOFF ---
-    const fileBuffer = await file.arrayBuffer();
-    const imageParts = await rasterizePdfToParts(fileBuffer);
-    const visionResult = await extractTakeoffFromPDF(imageParts);
-    console.log('[Orchestrator] Visual Takeoff complete.');
+      // --- VALIDATION GATE ---
+      if (!visionResult) {
+        throw new Error(`Vision Failure: Model returned null result.`);
+      }
+      
+      const totalArea = visionResult.totalEnvelope?.conditionedFloorArea || 0;
+      if (totalArea < 10) {
+         log(`[Vision Warning] Total area is suspiciously low (${totalArea} sq ft). Review logs.`);
+      } else {
+         log(`[Vision] Inference Successful. Extracted ${visionResult.rooms.length} architectural zones.`);
+         log(`[Vision] Total Conditioned Area: ${Math.round(totalArea)} sq ft.`);
+      }
 
-    // --- STAGE 2: LOGIC NORMALIZATION ---
-    // The truthful output of the vision stage becomes the direct input for the normalization stage.
-    const mjInput: ManualJInput = await normalizeDataForPhysics(visionResult);
-    console.log('[Orchestrator] Logic normalization complete.');
+      // --- CONSTRUCT DEBUG STATE (NO PHYSICS ENGINES) ---
+      const debugState: ProjectState = {
+        id: projectId,
+        status: 'COMPLETE',
+        metadata: {
+            jobName: visionResult.metadata?.jobName || 'Vision Audit Job',
+            clientName: visionResult.metadata?.client || 'Unknown Client',
+            designerName: 'CCIP AI Vision',
+            reportDate: new Date().toISOString()
+        },
+        visionRawData: visionResult,
+        designConditions: {
+          location: { city: 'Pending Input', state: '--', latitude: 35, elevation: 0 },
+          heating: { outdoorDB: 0, indoorDB: 0 },
+          cooling: { outdoorDB: 0, indoorDB: 0, dailyRange: 'M' }
+        },
+        construction: { 
+            infiltrationACH50: 0, 
+            shieldingClass: 1, 
+            ductSystem: { location: 'conditioned', rValue: 0, supplyArea: 0, returnArea: 0 } 
+        },
+        
+        rooms: visionResult.rooms.map((r, i) => ({
+            id: `room-${i}`,
+            name: r.name,
+            area: r.area,
+            volume: r.area * 9, // Assumption for volume
+            surfaces: [],
+            internals: { occupants: 0 },
+            calculationResult: { 
+                heatingLoad: 0, coolingSensible: 0, coolingLatent: 0, coolingLoad: 0, 
+                totalCooling: 0, heatingCFM: 0, coolingCFM: 0
+            },
+            terminals: []
+        })),
 
-    // --- STAGE 3: PHYSICS - WHOLE-HOUSE CALCULATION ---
-    // We first calculate the load for the entire building envelope.
-    const systemJResult = ManualJEngine.calculate(mjInput);
-    console.log('[Orchestrator] System-wide physics calculation complete.');
-
-    // --- STAGE 4: PHYSICS - ROOM-BY-ROOM APPORTIONMENT ---
-    // We distribute the total load across rooms based on their area percentage.
-    const totalArea = visionResult.roomList.reduce((sum, room) => sum + room.area, 0);
-    const calculatedRooms: Room[] = visionResult.roomList.map(roomData => {
-      const areaFraction = roomData.area / totalArea;
-      return {
-        id: `room-${roomData.name.replace(/\s+/g, '-')}`,
-        name: roomData.name,
-        area: roomData.area,
-        calculationResult: {
-          heatingLoad: Math.round(systemJResult.heatingLoad * areaFraction),
-          coolingLoad: Math.round(systemJResult.totalCooling * areaFraction),
-          heatingCFM: Math.round(systemJResult.heatingCFM * areaFraction),
-          coolingCFM: Math.round(systemJResult.coolingCFM * areaFraction)
+        systemTotals: {
+             totalHeating: 0, 
+             totalCooling: 0,
+             breakdown: [] 
+        },
+        selectedEquipment: {
+            heating: { make: '-', model: '-', outputBTU: 0, ahriRef: '', performance: { heatingBTUh: 0, totalCoolingBTUh: 0, sensibleCoolingBTUh: 0 } },
+            cooling: { make: '-', model: '-', outputBTU: 0, ahriRef: '', performance: { heatingBTUh: 0, totalCoolingBTUh: 0, sensibleCoolingBTUh: 0 } }
+        },
+        compliance: {
+            manualS: { status: 'Pass', totalCapacityRatio: 0, sensibleCapacityRatio: 0, heatingCapacityRatio: 0, sizingLimits: { minCoolingBTU: 0, maxCoolingBTU: 0 } },
+            manualD: { frictionRate: 0, totalCFM: 0, branches: [] },
+            manualT: { terminals: [] }
+        },
+        advancedSimulations: {
+            aed: { hourlyLoads: [], maxExcursionPercent: 0, limitPercent: 0, status: 'Pass' },
+            multiOrientation: []
         }
       };
-    });
+      
+      log('[Orchestrator] Vision Pipeline Complete. Physics engines bypassed.');
+      return debugState;
 
-    // --- STAGE 5: PROCUREMENT ---
-    const equipmentScenarios = await fetchEquipmentScenarios(systemJResult.totalCooling, systemJResult.heatingLoad);
-    console.log('[Orchestrator] Procurement complete.');
-
-    // --- STAGE 6: ADVANCED SIMULATIONS ---
-    const aedResult = ManualJEngine.calculateAED(mjInput);
-    const multiOrientationResult = ManualJEngine.calculateMultiOrientation(mjInput);
-    console.log('[Orchestrator] Advanced simulations complete.');
-
-    // --- STAGE 7: FINAL ASSEMBLY ---
-
-    // Process breakdown to fulfill systemTotals requirements
-    const breakdown = systemJResult.breakdown || [];
-    const findComponent = (term: string) => {
-        const h = breakdown.find((b: any) => b.component.includes(term))?.heating || 0;
-        const c = breakdown.find((b: any) => b.component.includes(term))?.cooling || 0;
-        return { heating: h, cooling: c };
-    };
-
-    const ductLoad = findComponent('Duct');
-    const ventLoad = findComponent('Infiltration');
-    const structureLoad = {
-        heating: Math.max(0, systemJResult.heatingLoad - ductLoad.heating - ventLoad.heating),
-        cooling: Math.max(0, systemJResult.totalCooling - ductLoad.cooling - ventLoad.cooling)
-    };
-
-    const finalProjectState: ProjectState = {
-      id: projectId,
-      metadata: visionResult.projectMetadata,
-      designConditions: {
-        heating: { outdoorDB: mjInput.design.outdoorTempWinter, indoorDB: mjInput.design.indoorTempWinter, designTD: mjInput.design.indoorTempWinter - mjInput.design.outdoorTempWinter },
-        cooling: { outdoorDB: mjInput.design.outdoorTempSummer, indoorDB: mjInput.design.indoorTempSummer, designTD: mjInput.design.outdoorTempSummer - mjInput.design.indoorTempSummer, dailyRange: mjInput.design.dailyRange },
-        infiltration: { method: 'N/A', quality: 'N/A' }, // This would come from visionResult
-        moistureDiff: systemJResult.psychrometrics.grainsDifference,
-      },
-      rooms: calculatedRooms,
-      selectedEquipment: { // This would be populated from the user's choice in the UI later
-        heating: { type: 'HEATING', make: 'TBD', model: 'TBD', trade: 'Generic', ahriRef: 'TBD', efficiencyRating: 'AFUE 80', efficiencyValue: 80, outputBTU: systemJResult.heatingLoad, airflowCFM: systemJResult.heatingCFM } as EquipmentDetails,
-        cooling: { type: 'COOLING', make: 'TBD', model: 'TBD', trade: 'Generic', ahriRef: 'TBD', efficiencyRating: 'SEER 14', efficiencyValue: 14, outputBTU: systemJResult.totalCooling, airflowCFM: systemJResult.coolingCFM, sensibleBTU: systemJResult.coolingSensible, latentBTU: systemJResult.coolingLatent } as EquipmentDetails,
-      },
-      advancedSimulations: { aed: aedResult, multiOrientation: multiOrientationResult },
-      systemTotals: {
-        totalHeating: systemJResult.heatingLoad,
-        totalCooling: systemJResult.totalCooling,
-        structureLoad: structureLoad,
-        ductLoad: { heating: ductLoad.heating, cooling: ductLoad.cooling },
-        ventilationLoad: { heating: ventLoad.heating, cooling: ventLoad.cooling },
-        totalEquipmentLoad: { heating: systemJResult.heatingLoad, cooling: systemJResult.totalCooling },
-        totalSensible: systemJResult.coolingSensible,
-        totalLatent: systemJResult.coolingLatent,
-        totalAirflow: systemJResult.coolingCFM,
-      },
-      status: 'COMPLETE',
-      processingMetrics: { calculationTime: (Date.now() - startTime) / 1000 },
-    };
-
-    console.log(`[Orchestrator] Pipeline complete for project: ${projectId}`);
-    return finalProjectState;
+    } catch (e: any) {
+      log(`[Fatal Error] Pipeline Failed: ${e.message}`);
+      throw e;
+    }
   }
 }

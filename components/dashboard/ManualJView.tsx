@@ -1,3 +1,4 @@
+// components/dashboard/ManualJView.tsx
 
 import React from 'react';
 import { ProjectState, Room } from '../../types';
@@ -8,6 +9,8 @@ interface LiveAuditPanelProps {
 }
 
 const LiveAuditPanel: React.FC<LiveAuditPanelProps> = ({ project }) => {
+  const { systemTotals, designConditions } = project;
+
   return (
     <div className="col-span-4 p-12 bg-slate-50 border-r space-y-12">
        <div className="space-y-2">
@@ -19,14 +22,14 @@ const LiveAuditPanel: React.FC<LiveAuditPanelProps> = ({ project }) => {
          <div>
            <p className="text-[10px] text-slate-400 font-black uppercase mb-1 tracking-widest">Cooling Load</p>
            <p className="text-6xl font-mono font-black text-slate-900 tracking-tighter">
-             {Math.round(project.systemTotals.totalCooling).toLocaleString()}
+             {Math.round(systemTotals?.totalCooling || 0).toLocaleString()}
              <span className="text-xl text-slate-300 ml-2">BTUH</span>
            </p>
          </div>
          <div>
            <p className="text-[10px] text-slate-400 font-black uppercase mb-1 tracking-widest">Heating Load</p>
            <p className="text-6xl font-mono font-black text-slate-900 tracking-tighter">
-             {Math.round(project.systemTotals.totalHeating).toLocaleString()}
+             {Math.round(systemTotals?.totalHeating || 0).toLocaleString()}
              <span className="text-xl text-slate-300 ml-2">BTUH</span>
            </p>
          </div>
@@ -35,11 +38,13 @@ const LiveAuditPanel: React.FC<LiveAuditPanelProps> = ({ project }) => {
        <div className="pt-10 border-t border-slate-200">
           <div className="flex items-center justify-between mb-4">
              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Moisture Diff</span>
-             <span className="text-sm font-mono font-black">{project.designConditions.moistureDiff} GR/LB</span>
+             <span className="text-sm font-mono font-black">{designConditions?.moistureDiff ?? 0} GR/LB</span>
           </div>
           <div className="flex items-center justify-between">
              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Daily Range</span>
-             <span className="text-sm font-mono font-black">{project.designConditions.cooling.dailyRange === 'M' ? 'MEDIUM (M)' : project.designConditions.cooling.dailyRange}</span>
+             <span className="text-sm font-mono font-black">
+               {designConditions?.cooling?.dailyRange === 'M' ? 'MEDIUM (M)' : (designConditions?.cooling?.dailyRange || '-')}
+             </span>
           </div>
        </div>
     </div>
@@ -69,13 +74,13 @@ const LoadLedgerTable: React.FC<LoadLedgerTableProps> = ({ rooms }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rooms.map(room => (
-              <tr key={room.id} className="hover:bg-slate-50 transition-colors">
+            {(rooms || []).map((room, i) => (
+              <tr key={room.id || i} className="hover:bg-slate-50 transition-colors">
                 <td className="px-10 py-6 font-bold text-slate-900 uppercase">{room.name}</td>
-                <td className="px-10 py-6 text-right font-mono font-bold text-amber-600">{Math.round(room.calculationResult.heatingLoad)}</td>
-                <td className="px-10 py-6 text-right font-mono font-bold text-brand-600">{Math.round(room.calculationResult.coolingLoad)}</td>
-                <td className="px-10 py-6 text-right font-mono text-slate-400">{Math.round(room.calculationResult.heatingCFM)}</td>
-                <td className="px-10 py-6 text-right font-mono font-black text-slate-900">{Math.round(room.calculationResult.coolingCFM)}</td>
+                <td className="px-10 py-6 text-right font-mono font-bold text-amber-600">{Math.round(room.calculationResult?.heatingLoad || 0)}</td>
+                <td className="px-10 py-6 text-right font-mono font-bold text-brand-600">{Math.round(room.calculationResult?.coolingLoad || 0)}</td>
+                <td className="px-10 py-6 text-right font-mono text-slate-400">{Math.round(room.calculationResult?.heatingCFM || 0)}</td>
+                <td className="px-10 py-6 text-right font-mono font-black text-slate-900">{Math.round(room.calculationResult?.coolingCFM || 0)}</td>
               </tr>
             ))}
           </tbody>

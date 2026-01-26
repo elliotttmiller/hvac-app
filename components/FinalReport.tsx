@@ -1,3 +1,4 @@
+// components/FinalReport.tsx
 
 import React, { useState } from 'react';
 import { ProjectState } from '../types';
@@ -11,6 +12,7 @@ interface FinalReportProps {
 }
 
 const AEDGraph = ({ loads }: { loads: number[] }) => {
+  if (!loads || loads.length === 0) return <div className="h-32 flex items-center justify-center text-xs text-slate-400">No Data</div>;
   const max = Math.max(...loads) * 1.2;
   return (
     <div className="w-full h-32 flex items-end gap-1 relative border-b border-l border-slate-300">
@@ -52,7 +54,16 @@ export const FinalReport: React.FC<FinalReportProps> = ({ project }) => {
     }
   };
 
-  const { advancedSimulations, systemTotals, designConditions, metadata } = project;
+  const { advancedSimulations, systemTotals, designConditions, metadata, selectedEquipment } = project;
+  const rooms = project.rooms || [];
+  const totalArea = rooms.reduce((a,r)=>a+r.area,0);
+  
+  const htgTotal = systemTotals?.totalHeating || 0;
+  const clgTotal = systemTotals?.totalCooling || 0;
+
+  // Safe access for equipment data
+  const heatEq = selectedEquipment?.heating;
+  const coolEq = selectedEquipment?.cooling;
 
   return (
     <div className="flex flex-col items-center min-h-screen bg-slate-100 print:bg-white pb-20 relative">
@@ -74,16 +85,16 @@ export const FinalReport: React.FC<FinalReportProps> = ({ project }) => {
 
       <div className="space-y-12 print:space-y-0 flex flex-col items-center">
         
-        {/* REPORT PREVIEW (HTML Representation of PDF content) */}
+        {/* REPORT PREVIEW */}
         <ReportPage sheetId="J-101" title="Load Short Form" subTitle="Entire House • Heating and Cooling" project={project}>
           <div className="grid grid-cols-2 gap-8 mb-6 text-xs">
              <div>
-                <p className="font-bold">For: <span className="font-normal">{metadata.clientName}</span></p>
-                <p>{metadata.clientCompany}</p>
+                <p className="font-bold">For: <span className="font-normal">{metadata?.clientName ?? 'Valued Client'}</span></p>
+                <p>{metadata?.clientCompany ?? ''}</p>
              </div>
              <div className="text-right">
-                <p className="font-bold">By: <span className="font-normal">{metadata.designerName}</span></p>
-                <p>Job: {metadata.jobName}</p>
+                <p className="font-bold">By: <span className="font-normal">{metadata?.designerName ?? 'CCIP AI'}</span></p>
+                <p>Job: {metadata?.jobName ?? project.id}</p>
              </div>
           </div>
 
@@ -95,19 +106,51 @@ export const FinalReport: React.FC<FinalReportProps> = ({ project }) => {
                      <tr className="border-b border-slate-300"><th className="text-left"></th><th className="text-right">Htg</th><th className="text-right">Clg</th></tr>
                    </thead>
                    <tbody>
-                      <tr><td className="font-bold">Outside db (°F)</td><td className="text-right">{designConditions.heating.outdoorDB}</td><td className="text-right">{designConditions.cooling.outdoorDB}</td></tr>
-                      <tr><td className="font-bold">Inside db (°F)</td><td className="text-right">{designConditions.heating.indoorDB}</td><td className="text-right">{designConditions.cooling.indoorDB}</td></tr>
+                      <tr>
+                        <td className="font-bold">Outside db (°F)</td>
+                        <td className="text-right">{designConditions?.heating?.outdoorDB ?? '-'}</td>
+                        <td className="text-right">{designConditions?.cooling?.outdoorDB ?? '-'}</td>
+                      </tr>
+                      <tr>
+                        <td className="font-bold">Inside db (°F)</td>
+                        <td className="text-right">{designConditions?.heating?.indoorDB ?? '-'}</td>
+                        <td className="text-right">{designConditions?.cooling?.indoorDB ?? '-'}</td>
+                      </tr>
                    </tbody>
                 </table>
              </div>
              <div>
                 <table className="w-full">
                    <tbody>
-                      <tr><td className="font-bold">Daily Range</td><td className="text-right">{designConditions.cooling.dailyRange}</td></tr>
-                      <tr><td className="font-bold">Moisture Diff</td><td className="text-right" colSpan={2}>{designConditions.moistureDiff}</td></tr>
+                      <tr><td className="font-bold">Daily Range</td><td className="text-right">{designConditions?.cooling?.dailyRange ?? 'M'}</td></tr>
+                      <tr><td className="font-bold">Moisture Diff</td><td className="text-right" colSpan={2}>{designConditions?.moistureDiff ?? 0} GR/LB</td></tr>
                    </tbody>
                 </table>
              </div>
+          </div>
+
+          {/* Equipment Info Section */}
+          <div className="grid grid-cols-2 gap-8 mb-6 border-b border-slate-200 pb-6">
+            <div>
+              <p className="text-[10px] font-black uppercase mb-2">HEATING EQUIPMENT</p>
+              {heatEq ? (
+                <div className="text-[10px] space-y-1">
+                  <p><span className="font-bold">Make:</span> {heatEq.make}</p>
+                  <p><span className="font-bold">Model:</span> {heatEq.model}</p>
+                  <p><span className="font-bold">Output:</span> {(heatEq.outputBTU || 0).toLocaleString()} Btuh</p>
+                </div>
+              ) : <p className="text-[10px] text-slate-400 italic">Not specified</p>}
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase mb-2">COOLING EQUIPMENT</p>
+              {coolEq ? (
+                <div className="text-[10px] space-y-1">
+                  <p><span className="font-bold">Make:</span> {coolEq.make}</p>
+                  <p><span className="font-bold">Model:</span> {coolEq.model}</p>
+                  <p><span className="font-bold">Output:</span> {(coolEq.outputBTU || 0).toLocaleString()} Btuh</p>
+                </div>
+              ) : <p className="text-[10px] text-slate-400 italic">Not specified</p>}
+            </div>
           </div>
 
           {/* Room Schedule */}
@@ -121,19 +164,19 @@ export const FinalReport: React.FC<FinalReportProps> = ({ project }) => {
                </tr>
              </thead>
              <tbody className="divide-y divide-slate-200">
-                {project.rooms.map((r, i) => (
+                {rooms.map((r, i) => (
                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                       <td className="p-2 font-bold">{r.name}</td>
                       <td className="p-2 text-right">{Math.round(r.area)}</td>
-                      <td className="p-2 text-right">{Math.round(r.calculationResult.heatingLoad)}</td>
-                      <td className="p-2 text-right">{Math.round(r.calculationResult.coolingLoad)}</td>
+                      <td className="p-2 text-right">{Math.round(r.calculationResult?.heatingLoad || 0)}</td>
+                      <td className="p-2 text-right">{Math.round(r.calculationResult?.coolingLoad || 0)}</td>
                    </tr>
                 ))}
                 <tr className="bg-slate-900 text-white font-black border-t-2 border-black">
                    <td className="p-2 uppercase">Entire House</td>
-                   <td className="p-2 text-right">{Math.round(project.rooms.reduce((a,r)=>a+r.area,0))}</td>
-                   <td className="p-2 text-right">{Math.round(systemTotals.totalHeating)}</td>
-                   <td className="p-2 text-right">{Math.round(systemTotals.totalCooling)}</td>
+                   <td className="p-2 text-right">{Math.round(totalArea)}</td>
+                   <td className="p-2 text-right">{Math.round(htgTotal)}</td>
+                   <td className="p-2 text-right">{Math.round(clgTotal)}</td>
                 </tr>
              </tbody>
           </table>
@@ -144,20 +187,24 @@ export const FinalReport: React.FC<FinalReportProps> = ({ project }) => {
            <div className="grid grid-cols-2 gap-12 mb-10">
               <div className="border border-slate-200 p-6 rounded-xl">
                  <h4 className="font-black uppercase text-xs mb-4">Hourly Glazing Load Profile</h4>
-                 <AEDGraph loads={advancedSimulations.aed.hourlyLoads} />
+                 {advancedSimulations?.aed ? (
+                   <AEDGraph loads={advancedSimulations.aed.hourlyLoads} />
+                 ) : <div className="h-32 flex items-center justify-center text-[10px] text-slate-400">Simulation Data Unavailable</div>}
               </div>
               <div className="space-y-6">
                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
                     <p className="text-[10px] uppercase font-black text-slate-400">Peak Excursion</p>
-                    <p className="text-3xl font-black text-slate-900">{advancedSimulations.aed.maxExcursionPercent}%</p>
+                    <p className="text-3xl font-black text-slate-900">{advancedSimulations?.aed?.maxExcursionPercent ?? 0}%</p>
                     <p className="text-[10px] text-slate-500 mt-1">Limit: 30%</p>
                  </div>
+                 {advancedSimulations?.aed && (
                  <div className={`p-6 rounded-xl border flex items-center gap-4 ${advancedSimulations.aed.status === 'Pass' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                     {advancedSimulations.aed.status === 'Pass' ? <CheckCircle2 className="w-8 h-8" /> : <AlertTriangle className="w-8 h-8" />}
                     <div>
-                       <p className="font-black uppercase text-sm">AED Diversity: {advancedSimulations.aed.status}</p>
+                       <p className="font-black uppercase text-sm">AED Diversity: {advancedSimulations.aed.status ?? 'Pass'}</p>
                     </div>
                  </div>
+                 )}
               </div>
            </div>
         </ReportPage>

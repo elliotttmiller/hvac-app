@@ -26,7 +26,9 @@ export async function rasterizePdfToParts(fileBuffer: ArrayBuffer): Promise<Part
 
     for (let i = 1; i <= pagesToProcess; i++) {
       const page = await pdfProxy.getPage(i);
-      const viewport = page.getViewport({ scale: 2.0 }); // High-resolution for accuracy
+      // UPDATED: Increased scale to 4.0 (Super-Sampling). 
+      // This is critical for reading small text labels like "Bed 4" or "Sun Room" in large floor plans.
+      const viewport = page.getViewport({ scale: 4.0 }); 
 
       // Use browser native canvas
       const canvas = document.createElement('canvas');
@@ -47,8 +49,8 @@ export async function rasterizePdfToParts(fileBuffer: ArrayBuffer): Promise<Part
       } as any).promise;
 
       // Convert the canvas to a JPEG base64 string
-      // toDataURL returns "data:image/jpeg;base64,..."
-      const base64Url = canvas.toDataURL('image/jpeg', 0.85);
+      // Quality set to 0.8 to balance the massive resolution increase with payload size.
+      const base64Url = canvas.toDataURL('image/jpeg', 0.80);
       const base64Data = base64Url.split(',')[1];
       
       imageParts.push({ inlineData: { data: base64Data, mimeType: 'image/jpeg' } });

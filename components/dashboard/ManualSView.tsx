@@ -10,11 +10,25 @@ interface ManualSViewProps {
 export const ManualSView: React.FC<ManualSViewProps> = ({ project }) => {
   const { selectedEquipment, systemTotals } = project;
   
+  // Guard clause for missing data
+  if (!systemTotals || !selectedEquipment || !selectedEquipment.cooling || !selectedEquipment.heating) {
+    return (
+        <div className="flex flex-col items-center justify-center h-full text-slate-400 p-16">
+            <AlertCircle className="w-12 h-12 mb-4 text-slate-300" />
+            <p className="font-bold uppercase tracking-widest text-xs">Compliance Data Unavailable</p>
+        </div>
+    );
+  }
+
   // Basic compliance check logic purely for display
-  const coolingRatio = selectedEquipment.cooling.outputBTU / systemTotals.totalCooling;
+  // Use fallbacks to prevent NaN or Infinity if totals are zero
+  const totalCooling = systemTotals.totalCooling || 1;
+  const totalHeating = systemTotals.totalHeating || 1;
+
+  const coolingRatio = selectedEquipment.cooling.outputBTU / totalCooling;
   const isCoolingCompliant = coolingRatio >= 0.95 && coolingRatio <= 1.25; // 115-125% typically
   
-  const heatingRatio = selectedEquipment.heating.outputBTU / systemTotals.totalHeating;
+  const heatingRatio = selectedEquipment.heating.outputBTU / totalHeating;
   const isHeatingCompliant = heatingRatio >= 1.0 && heatingRatio <= 1.4;
 
   return (

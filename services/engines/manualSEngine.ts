@@ -1,51 +1,72 @@
 
-/**
- * MANUAL S: RESIDENTIAL EQUIPMENT SELECTION
- * Standard for verifying equipment capacity matches the design load.
- */
+// backend/engines/manualSEngine.ts
 
-export interface SizingCompliance {
-  isCompliant: boolean;
-  coolingRatio: number;
-  heatingRatio: number;
-  status: 'OPTIMAL' | 'OVERSIZED' | 'UNDERSIZED';
-  notes: string;
-  coolingCompliance: string;
-  sensibleCompliance: string;
-  heatingCompliance: string;
-}
+import { ManualSResult, EquipmentDetails } from '../types';
 
 export class ManualSEngine {
-  /**
-   * ACCA Rules:
-   * Cooling: 95% to 115% of total cooling load (125% for variable speed).
-   * Heating: 100% to 140% of design heating load.
-   */
+  public static selectEquipment(heatingLoad: number, coolingLoad: number): { heating: EquipmentDetails, cooling: EquipmentDetails } {
+    // Deterministic selection based on load for demo purposes
+    const heatingOutput = Math.ceil(heatingLoad * 1.15); // 15% safety
+    const coolingOutput = Math.ceil(coolingLoad * 1.05); // 5% safety
+    
+    return {
+      heating: {
+        make: "Carrier",
+        model: "59TP6",
+        ahriRef: "8923412",
+        trade: "Furnace",
+        efficiencyRating: "96.5% AFUE",
+        airflowCFM: Math.round(heatingOutput / 50),
+        outputBTU: heatingOutput,
+        performance: {
+           heatingBTUh: heatingOutput,
+           totalCoolingBTUh: 0,
+           sensibleCoolingBTUh: 0
+        }
+      },
+      cooling: {
+        make: "Carrier",
+        model: "24VNA9",
+        ahriRef: "2039481",
+        trade: "A/C Split System",
+        efficiencyRating: "19 SEER",
+        airflowCFM: Math.round(coolingOutput / 20),
+        outputBTU: coolingOutput,
+        sensibleBTU: Math.round(coolingOutput * 0.75),
+        latentBTU: Math.round(coolingOutput * 0.25),
+        performance: {
+          heatingBTUh: 0,
+          totalCoolingBTUh: coolingOutput,
+          sensibleCoolingBTUh: Math.round(coolingOutput * 0.75)
+        }
+      }
+    };
+  }
+
   public static verifySelection(
-    load: { sensible: number, total: number, heating: number },
-    equipment: { sensible: number, total: number, heating: number }
-  ): SizingCompliance {
-    const coolingRatio = equipment.total / (load.total || 1);
-    const heatingRatio = equipment.heating / (load.heating || 1);
-    const sensibleRatio = equipment.sensible / (load.sensible || 1);
+    load: { totalHeating: number; totalCooling: number; totalSensible: number; },
+    equipment: EquipmentDetails
+  ): ManualSResult {
+    
+    const { performance } = equipment;
+    const totalCapacityRatio = performance.totalCoolingBTUh / load.totalCooling;
+    const sensibleCapacityRatio = performance.sensibleCoolingBTUh / load.totalSensible;
+    const heatingCapacityRatio = performance.heatingBTUh / load.totalHeating;
 
-    let status: 'OPTIMAL' | 'OVERSIZED' | 'UNDERSIZED' = 'OPTIMAL';
-    if (coolingRatio < 0.95) status = 'UNDERSIZED';
-    else if (coolingRatio > 1.25) status = 'OVERSIZED';
-
-    const isCompliant = coolingRatio >= 0.95 && coolingRatio <= 1.25 && heatingRatio >= 1.0;
+    let status: ManualSResult['status'] = 'Pass';
+    if (totalCapacityRatio < 0.95) status = 'Fail: Undersized';
+    if (totalCapacityRatio > 1.15) status = 'Fail: Oversized';
+    if (sensibleCapacityRatio < 1.0) status = 'Warning: SHR Mismatch';
 
     return {
-      isCompliant,
-      coolingRatio,
-      heatingRatio,
       status,
-      coolingCompliance: coolingRatio.toFixed(2),
-      sensibleCompliance: sensibleRatio.toFixed(2),
-      heatingCompliance: heatingRatio.toFixed(2),
-      notes: isCompliant 
-        ? "Selection is within ACCA Manual S tolerances." 
-        : `Non-compliant: ${status === 'OVERSIZED' ? 'Equipment capacity exceeds 125% limit.' : 'Equipment capacity fails to meet 95% threshold.'}`
+      totalCapacityRatio: parseFloat(totalCapacityRatio.toFixed(2)),
+      sensibleCapacityRatio: parseFloat(sensibleCapacityRatio.toFixed(2)),
+      heatingCapacityRatio: parseFloat(heatingCapacityRatio.toFixed(2)),
+      sizingLimits: {
+        minCoolingBTU: Math.round(load.totalCooling * 0.95),
+        maxCoolingBTU: Math.round(load.totalCooling * 1.15)
+      }
     };
   }
 }
