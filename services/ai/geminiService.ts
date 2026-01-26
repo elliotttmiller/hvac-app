@@ -6,7 +6,7 @@ import { SYSTEM_PROMPTS } from './prompts';
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // CONFIGURATION
-const VISION_MODEL = 'gemini-2.5-flash'; 
+const VISION_MODEL = 'gemini-3-flash-preview'; 
 const LOGIC_MODEL = 'gemini-2.5-flash'; 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 2000;
