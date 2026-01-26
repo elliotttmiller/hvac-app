@@ -4,12 +4,15 @@ import { ZoneLabel, DiscoveryResult, ZoneAnnotation, AnnotationResult, VisionTak
 import { SYSTEM_PROMPTS } from './prompts';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const VISION_MODEL = 'gemini-2.5-flash'; 
-const LOGIC_MODEL = 'gemini-2.5-flash';
+
+// CONFIGURATION
+const VISION_MODEL = 'gemini-2.5-flash'; // Recommended for best spatial reasoning
+const LOGIC_MODEL = 'gemini-2.5-flash'; // Recommended for speed/math
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2000;
 
 // --- GENAI SDK SCHEMAS ---
 
-// UPDATED: 'layout_reasoning' is FIRST to enforce Chain-of-Thought
 const discoverySchema: Schema = {
     type: Type.OBJECT,
     properties: {
@@ -105,6 +108,50 @@ const AnnotationSchema = z.object({
   })).optional()
 });
 
+// --- HELPER: FAULT TOLERANCE (RETRY LOGIC) ---
+
+/**
+ * Wraps the Google AI generateContent call with exponential backoff for 503/Overloaded errors.
+ */
+async function generateContentWithRetry(
+    modelName: string, 
+    contents: Content[], 
+    responseSchema: Schema, 
+    log: (msg: string) => void
+): Promise<string> {
+    let attempt = 0;
+    
+    while (attempt < MAX_RETRIES) {
+        try {
+            const result = await ai.models.generateContent({
+                model: modelName,
+                contents,
+                config: { 
+                    responseMimeType: 'application/json',
+                    responseSchema: responseSchema 
+                }
+            });
+            
+            if (!result.text) throw new Error("Empty response from AI model");
+            return result.text;
+
+        } catch (error: any) {
+            attempt++;
+            const isOverloaded = error.message?.includes('overloaded') || error.code === 503 || error.status === 'UNAVAILABLE';
+            
+            if (isOverloaded && attempt < MAX_RETRIES) {
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+                log(`[AI Service] Model ${modelName} overloaded. Retrying in ${delay}ms (Attempt ${attempt}/${MAX_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                // If it's not an overload error, or we ran out of retries, throw it.
+                throw error;
+            }
+        }
+    }
+    throw new Error(`Failed to generate content after ${MAX_RETRIES} attempts.`);
+}
+
 // --- HELPER: SPATIAL DEDUPLICATION (IoU) ---
 
 function calculateIoU(boxA: [number, number, number, number], boxB: [number, number, number, number]): number {
@@ -132,10 +179,6 @@ function filterOverlappingZones(zones: ZoneAnnotation[]): ZoneAnnotation[] {
         let isDuplicate = false;
         for (const existing of uniqueZones) {
             const iou = calculateIoU(zone.boundingBox, existing.boundingBox);
-            
-            // SMART DEDUPLICATION LOGIC:
-            // 1. If names match exactly, be aggressive (30% overlap is enough to merge)
-            // 2. If names differ, be conservative (60% overlap required to merge)
             const namesMatch = zone.roomName.toLowerCase().replace(/[^a-z0-9]/g, '') === existing.roomName.toLowerCase().replace(/[^a-z0-9]/g, '');
             const threshold = namesMatch ? 0.30 : 0.60;
 
@@ -153,18 +196,12 @@ function filterOverlappingZones(zones: ZoneAnnotation[]): ZoneAnnotation[] {
 
 // --- PIPELINE FUNCTIONS ---
 
-async function discoverZoneLabels(imageParts: Part[]): Promise<DiscoveryResult> {
+async function discoverZoneLabels(imageParts: Part[], log: (msg: string) => void): Promise<DiscoveryResult> {
     const prompt: Part = { text: SYSTEM_PROMPTS.PROMPT_DISCOVER_ZONES };
     const contents: Content[] = [{ role: 'user', parts: [...imageParts, prompt] }];
     
-    const result = await ai.models.generateContent({
-        model: VISION_MODEL,
-        contents,
-        config: { responseMimeType: 'application/json', responseSchema: discoverySchema }
-    });
-
-    const responseText = result.text;
-    if (!responseText) throw new Error("Zone Discovery returned empty response");
+    // Use Retry Wrapper
+    const responseText = await generateContentWithRetry(VISION_MODEL, contents, discoverySchema, log);
     
     const rawJson = JSON.parse(responseText);
     const validation = DiscoveryResultSchema.safeParse(rawJson);
@@ -178,18 +215,12 @@ async function discoverZoneLabels(imageParts: Part[]): Promise<DiscoveryResult> 
     };
 }
 
-async function analyzeZoneBatch(imageParts: Part[], zoneBatch: ZoneLabel[]): Promise<ZoneAnnotation[]> {
+async function analyzeZoneBatch(imageParts: Part[], zoneBatch: ZoneLabel[], log: (msg: string) => void): Promise<ZoneAnnotation[]> {
     const prompt: Part = { text: SYSTEM_PROMPTS.PROMPT_ANALYZE_ZONE_BATCH(zoneBatch) };
     const contents: Content[] = [{ role: 'user', parts: [...imageParts, prompt] }];
 
-    const result = await ai.models.generateContent({
-        model: VISION_MODEL,
-        contents,
-        config: { responseMimeType: 'application/json', responseSchema: batchAnalysisSchema }
-    });
-
-    const responseText = result.text;
-    if (!responseText) throw new Error(`Analysis for batch returned empty response`);
+    // Use Retry Wrapper
+    const responseText = await generateContentWithRetry(VISION_MODEL, contents, batchAnalysisSchema, log);
 
     const rawJson = JSON.parse(responseText) as ZoneAnnotation[];
     const validation = z.array(ZoneAnnotationSchema).safeParse(rawJson);
@@ -202,9 +233,8 @@ async function runIntelligentAnnotator(imageParts: Part[], onLog?: (msg: string)
   const log = (msg: string) => { onLog?.(msg); console.log(msg); };
 
   log(`[Annotator] Step 1A: Discovering zones and scale...`);
-  const discoveryResult = await discoverZoneLabels(imageParts);
+  const discoveryResult = await discoverZoneLabels(imageParts, log);
   
-  // LOG THE VISUAL CHAIN OF THOUGHT
   log(`[Annotator] AI Visual Reasoning:\n${discoveryResult.layout_reasoning}\n`);
   
   const discoveredZones = discoveryResult.zones;
@@ -221,14 +251,14 @@ async function runIntelligentAnnotator(imageParts: Part[], onLog?: (msg: string)
 
     log(`[Annotator] Step 1B: Analyzing batch 1 of ${batch2.length > 0 ? 2 : 1}...`);
     try {
-      const b1 = await analyzeZoneBatch(imageParts, batch1);
+      const b1 = await analyzeZoneBatch(imageParts, batch1, log);
       allRoomAnnotations.push(...b1);
     } catch (e) { log(`[Annotator] WARN: Batch 1 failed: ${e}`); }
 
     if (batch2.length > 0) {
       log(`[Annotator] Step 1B: Analyzing batch 2 of 2...`);
       try {
-        const b2 = await analyzeZoneBatch(imageParts, batch2);
+        const b2 = await analyzeZoneBatch(imageParts, batch2, log);
         allRoomAnnotations.push(...b2);
       } catch (e) { log(`[Annotator] WARN: Batch 2 failed: ${e}`); }
     }
@@ -254,27 +284,17 @@ async function runIntelligentAnnotator(imageParts: Part[], onLog?: (msg: string)
   return validation.data;
 }
 
-async function runDataCalculator(annotations: AnnotationResult): Promise<VisionTakeoffResult> {
+async function runDataCalculator(annotations: AnnotationResult, log: (msg: string) => void): Promise<VisionTakeoffResult> {
   const prompt: Part = { text: SYSTEM_PROMPTS.DATA_CALCULATOR_PROMPT(JSON.stringify(annotations)) };
   const contents: Content[] = [{ role: 'user', parts: [prompt] }];
 
-  try {
-    const result = await ai.models.generateContent({
-        model: LOGIC_MODEL,
-        contents,
-        config: { responseMimeType: 'application/json', responseSchema: calculatorSchema }
-    });
+  // Use Retry Wrapper
+  const responseText = await generateContentWithRetry(LOGIC_MODEL, contents, calculatorSchema, log);
 
-    const responseText = result.text;
-    if (!responseText) throw new Error("Calculator returned empty response");
-
-    const rawJson = JSON.parse(responseText);
-    const validation = VisionTakeoffResultSchema.safeParse(rawJson);
-    if (!validation.success) throw new Error(`Calculator output failed validation`);
-    return validation.data;
-  } catch (error: any) {
-    throw new Error(`AI Data Calculator Failed: ${error.message}`);
-  }
+  const rawJson = JSON.parse(responseText);
+  const validation = VisionTakeoffResultSchema.safeParse(rawJson);
+  if (!validation.success) throw new Error(`Calculator output failed validation`);
+  return validation.data;
 }
 
 export async function runVisionStage(imageParts: Part[], onLog?: (msg: string) => void): Promise<VisionTakeoffResult> {
@@ -295,7 +315,7 @@ export async function runVisionStage(imageParts: Part[], onLog?: (msg: string) =
   }
 
   log(`[Vision Stage] Step 2: Running Data Calculator AI (${LOGIC_MODEL})...`);
-  const finalTakeoff = await runDataCalculator(annotations);
+  const finalTakeoff = await runDataCalculator(annotations, log);
   
   const mergedResult: VisionTakeoffResult = {
       ...finalTakeoff,
