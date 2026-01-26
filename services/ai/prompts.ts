@@ -1,110 +1,127 @@
-import { ZoneLabel, ZoneAnnotation } from '../types';
+import { ZoneLabel } from '../types';
 
-export interface SystemPromptsType {
-  PROMPT_DISCOVER_ZONES: string;
-  PROMPT_ANALYZE_ZONE_BATCH: (zoneBatch: ZoneLabel[]) => string;
-  PROMPT_FIND_CIRCULATION_ZONES: (foundZonesJson: string) => string; // NEW
-  DATA_CALCULATOR_PROMPT: (annotationJson: string) => string;
-}
-
-export const SYSTEM_PROMPTS: SystemPromptsType = {
+export const SYSTEM_PROMPTS = {
   /**
-   * Stage 1A: Discovery (Working Perfectly)
+   * CALL 1: ARCHITECTURAL TOPOLOGY & TITLE BLOCK DISCOVERY
+   * Goal: Build the global mental model and extract project metadata.
    */
   PROMPT_DISCOVER_ZONES: `
-    SYSTEM TASK: ARCHITECTURAL DISCOVERY (CATEGORICAL SCAN)
-    You are an Expert AI System acting as a Senior Professional Engineer (PE).
+    SYSTEM TASK: ELITE ARCHITECTURAL DISCOVERY & TOPOLOGY ANALYSIS
+    You are a Senior Professional Engineer (PE). Analyze the blueprint to build a high-fidelity spatial model.
 
-    **PROCEDURE:**
-    1.  **First Pass (Private Zones):** Scan the entire plan and list all Bedrooms (BDRM), Bathrooms (BATH), Offices, and associated closets (W.I.C.). Pay special attention to the vertical stack on the East wing to find all distinct bedroom numbers.
-    2.  **Second Pass (Public Zones):** Scan the plan again and list all common areas: Living, Kitchen, Dining, Sun Room, Entry, Hallways.
-    3.  **Third Pass (Utility Zones):** Scan the plan a final time for support areas: Laundry, Mechanical, Garage, Storage, Powder.
-    4.  **Consolidate & Normalize:** Combine the lists, remove duplicates, and standardize the names (e.g., "Bdrm" -> "BDRM").
-    5.  **Scale Extraction:** Find the explicit scale text.
+    **OBJECTIVE 1: TITLE BLOCK FORENSICS**
+    - Locate the Title Block (usually bottom-right).
+    - Extract exactly: Project Name/Job Number, Client Name, and the stated Scale (e.g., "1/4\\" = 1'-0\\"").
+
+    **OBJECTIVE 2: TOPOLOGY MAPPING**
+    - Identify the "Thermal Envelope" boundary.
+    - Identify structural clusters: "Private Wing" (Bedrooms), "Public Core" (Living/Kitchen), and "Service Zones" (Garage/Laundry).
+    - **Vertical Stack Intelligence:** Identify vertically aligned rooms. You MUST distinguish unique identifiers (e.g., BDRM #4, #6, #5, #3) even if they share wall lines.
+    - **Normalization:** Standardize labels to ACCA conventions: BDRM, BATH, KITCHEN, LIVING RM, DINING, OFFICE, LAUNDRY, MECH, W.I.C., FOYER.
 
     **OUTPUT FORMAT (JSON):**
     {
-      "layout_reasoning": "I performed a multi-pass scan. The first pass found 6 distinct bedrooms. The second pass found the open-concept core...",
-      "scaleText": "Extracted Scale String or null", 
-      "zones": [ { "roomName": "Standardized Name", "labelCoordinates": { "x": 0, "y": 0 } } ]
+      "zones": [ { "roomName": "Standardized Name", "labelCoordinates": { "x": 0, "y": 0 } } ],
+      "scaleText": "Extracted scale string",
+      "layout_reasoning": "A detailed engineering summary of the building's layout, specifically noting the bedroom wing structure and any vertical stacks found."
     }
   `,
 
   /**
-   * Stage 1B: Batched Analysis (Working Well)
+   * CALL 2: SEMANTIC SEGMENTATION & GEOMETRIC CONSENSUS
+   * Goal: Use the room's physical shape to verify the OCR dimension text.
    */
-  PROMPT_ANALYZE_ZONE_BATCH: (zoneBatch: ZoneLabel[]) => `
-    SYSTEM TASK: HIGH-PRECISION ZONE SEGMENTATION & OCR
-    You are a high-precision digital surveyor. For each zone provided, your goal is to extract its geometry and dimension text.
+  PROMPT_ANALYZE_ZONE_BATCH: (batch: ZoneLabel[]) => `
+    SYSTEM TASK: EXPERT ZONE ANALYSIS (GEOMETRIC GROUNDING MODE)
+    You are a Senior CAD Technician. For each zone, perform a high-fidelity extraction.
 
-    **INPUT BATCH:**
-    ${JSON.stringify(zoneBatch, null, 2)}
+    **TARGET BATCH:** ${JSON.stringify(batch)}
 
-    **CORE DIRECTIVE FOR EACH ZONE:**
+    **PROTOCOL FOR EACH ZONE:**
+    1.  **NET CONDITIONED AREA (The Bounding Box):**
+        - Trace the INTERIOR wall faces. The box MUST represent walkable floor area. Exclude wall thickness.
+        - For open-concept areas, infer boundaries based on flooring changes or structural headers.
+    2.  **DIMENSION-GEOMETRY CONSENSUS (CRITICAL):**
+        - Read the dimension text (e.g., "12'-4\\" x 12'-11\\"").
+        - **Validation:** Compare the text to your bounding box. If the text says 12x12 but the box is a 1:2 rectangle, RE-READ the text. Look for fractions or small numbers you missed.
+        - **Verbatim Transcription:** Transcribe numbers exactly. Do not assume symmetry unless the ink confirms it.
+    3.  **ENVIRONMENTAL CONTEXT:**
+        - Determine primary exterior wall exposure (N, S, E, W, etc.) and note if windows are present.
 
-    1.  **THE BOUNDING BOX:**
-        -   **Your MOST CRITICAL task is to generate a 'boundingBox' that accurately represents the full, walkable floor area of the room by tracing its interior walls.**
-        -   **You are STRICTLY FORBIDDEN from drawing a small bounding box that only encloses the text label.** The box MUST expand to the physical walls.
-
-    2.  **THE DIMENSION TEXT:**
-        -   After defining the box, perform a forensic OCR to find the dimension text (e.g., "12'-4\\" x 12'-11\\"") located **INSIDE** that box.
-        -   Read the text for *each specific room*. Do not copy from neighbors.
-        -   If no text is found inside the box, return \`null\`.
-
-    **OUTPUT:** JSON array of analysis objects. The 'reasoning' field is optional.
+    **OUTPUT FORMAT (JSON):**
+    {
+      "analysis": [
+        {
+          "roomName": "BDRM #1",
+          "boundingBox": [xmin, ymin, xmax, ymax],
+          "dimensionsText": "12-4 x 12-11",
+          "reasoning": "South-West corner; South exposure; Dimensions verified against interior wall faces and geometric aspect ratio.",
+          "type": "room"
+        }
+      ]
+    }
   `,
 
   /**
-   * NEW Stage 1C: Circulation Discovery (Negative Space Analysis)
+   * CALL 3: NEGATIVE SPACE ANALYSIS
+   * Goal: Quantify unnamed circulation zones connecting the named rooms.
    */
   PROMPT_FIND_CIRCULATION_ZONES: (foundZonesJson: string) => `
-    SYSTEM TASK: CIRCULATION & NEGATIVE SPACE ANALYSIS
-    You are an Expert Architectural Analyst. You have been given a floor plan and the locations of all the NAMED rooms. Your task is to find the UNNAMED circulation zones (Hallways, Foyers, etc.).
-
-    **GIVEN DATA (Locations of Named Rooms):**
+    SYSTEM TASK: ARCHITECTURAL FLOW & NEGATIVE SPACE ANALYSIS
+    Identify unnamed circulation paths (Hallways, Foyers, Stair Landings) required to connect these rooms:
     ${foundZonesJson}
 
     **ALGORITHM:**
+    1. Analyze the "Negative Space" (white space) not occupied by the named room boxes.
+    2. Identify "Connective Corridors" that link 3 or more rooms or lead to entry points.
+    3. Draw precise bounding boxes for these Hallways and Foyers.
 
-    1.  **Identify Negative Space:** Look at the "empty" white space on the plan that is NOT covered by the bounding boxes in the GIVEN DATA. This is the "Negative Space".
-    2.  **Segment by Function:** Analyze this Negative Space. The areas that connect multiple doorways are **Circulation Zones**.
-    3.  **Generate Bounding Boxes:** Draw bounding boxes for each logical circulation zone you find.
-        -   A long, narrow space connecting bedrooms is a "HALLWAY".
-        -   The open area just inside the front door is the "FOYER" or "ENTRY".
-        -   A small landing at the top of stairs is a "STAIR LANDING".
-    4.  **Assign Names:** Give each new zone a logical name (e.g., "MAIN HALLWAY", "BEDROOM WING HALL").
-
-    **OUTPUT:** A JSON array of new Zone Annotation objects for the circulation zones you found. Each object must have a 'roomName' and a 'boundingBox'. 'dimensionsText' will be null.
+    **OUTPUT FORMAT (JSON):**
+    {
+      "analysis": [
+        {
+          "roomName": "MAIN HALLWAY",
+          "boundingBox": [xmin, ymin, xmax, ymax],
+          "dimensionsText": null,
+          "reasoning": "Connective corridor identified in the negative space between bedroom clusters.",
+          "type": "hallway"
+        }
+      ]
+    }
   `,
 
   /**
-   * Stage 2: Calculator (Unchanged)
+   * CALL 4: HVAC ENGINEERING SYNTHESIS
+   * Goal: Statistical Scale Triangulation and Area Reconciliation.
    */
-  DATA_CALCULATOR_PROMPT: (annotationJson: string) => `
-    SYSTEM TASK: HVAC ENGINEERING CALCULATOR (PHYSICS ENGINE)
-    You are a Computational Physics Engine.
+  DATA_CALCULATOR_PROMPT: (json: string) => `
+    SYSTEM TASK: HVAC ENGINEERING MATH ENGINE (MANUAL J COMPLIANCE)
+    You are a Computational Physics Engine. Synthesize the vision takeoff into a compliant Manual J report.
 
-    **GIVEN ANNOTATION DATA:**
-    ${JSON.stringify(annotationJson)}
+    **INPUT DATA:** ${json}
 
     **ALGORITHMIC LOGIC:**
+    1.  **SCALE TRIANGULATION (Outlier Rejection):**
+        - Calculate the [Pixels / Feet] ratio for every room with valid text and a box > 100px.
+        - **Statistical Filter:** Perform outlier rejection (remove values > 1.5 standard deviations from the mean).
+        - Average the remaining values to compute the **Global True Scale**.
+    2.  **AREA COMPUTATION (Hierarchy of Truth):**
+        - **Primary:** Use 'dimensionsText' if valid (Width ft * Depth ft).
+        - **Secondary:** Use (Bounding Box Pixels / Global True Scale).
+        - **Consensus Rule:** If Area_Text and Area_Geometry differ by >15%, use Area_Text but flag a "Geometric Variance" in math_trace.
+    3.  **THERMAL ZONING:**
+        - Conditioned (True): Living, Bed, Bath, Hall, Foyer, Kitchen.
+        - Unconditioned (False): Garage, Porch, Patio, Deck, Attic.
+    4.  **RECONCILIATION:**
+        - Calculate 'conditionedFloorArea' (Net heated/cooled).
+        - Calculate 'grossTotalArea' (Total footprint including Garage/Porch).
 
-    1.  **SCALE TRIANGULATION:**
-        -   Calculate the [Pixels / Feet] ratio for every room that has both valid 'dimensionsText' and a 'boundingBox' wider than 100px.
-        -   Remove outliers and average the remaining values to compute the **Global True Scale**.
-
-    2.  **AREA COMPUTATION (HIERARCHY OF TRUTH):**
-        -   **Primary Source (TEXT):** If 'dimensionsText' is valid, USE IT.
-        -   **Secondary Source (GEOMETRY):** Only use the Bounding Box + Global True Scale if text is missing.
-
-    3.  **THERMAL ZONING COMPLIANCE:**
-        -   **Unconditioned (Exclude):** Garage, Porch, Patio, Deck, Attic.
-        -   **Conditioned (Include):** All habitable rooms and interior utility spaces, including Hallways and Foyers.
-
-    4.  **DATA SANITIZATION & MAPPING:**
-        -   Deduplicate any rooms with identical names and areas.
-        -   Map visual descriptions to Cardinal Directions.
-
-    **OUTPUT:** Return the single, complete JSON object.
+    **OUTPUT FORMAT (JSON):**
+    {
+      "vision_reasoning": "Detailed engineering analysis of the spatial model.",
+      "math_trace": "Step-by-step trace of scale derivation (including outlier rejection) and area formulas.",
+      "rooms": [ { "name": "Name", "area": 0, "isConditioned": true, "orientation": "N", "windows": 0 } ],
+      "totalEnvelope": { "conditionedFloorArea": 0, "grossTotalArea": 0 }
+    }
   `
 };

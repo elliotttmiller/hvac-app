@@ -1,67 +1,154 @@
 import { z } from "zod";
 
-// --- NEW AI Vision Pipeline Data Structures ---
+// --- AI SDK CONTENT PART TYPES (NEW) ---
+export type TextPart = {
+  type: 'text';
+  text: string;
+};
 
+export type ImagePart = {
+  type: 'image';
+  image: string; // Base64 or URL
+  mimeType?: string;
+};
+
+export type FilePart = {
+  type: 'file';
+  file: string; // Base64 or URL
+  mimeType: string;
+  fileName: string;
+};
+
+export type ReasoningPart = {
+  type: 'reasoning';
+  content: string;
+};
+
+export type ToolCallPart = {
+  type: 'tool-call';
+  toolName: string;
+  toolArguments: Record<string, any>;
+};
+
+export type ToolResultPart = {
+  type: 'tool-result';
+  toolName: string;
+  result: any;
+};
+
+export type ToolApprovalRequest = {
+  type: 'tool-approval-request';
+  toolName: string;
+  toolArguments: Record<string, any>;
+};
+
+export type ToolApprovalResponse = {
+  type: 'tool-approval-response';
+  approved: boolean;
+  reasoning?: string;
+};
+
+export type ContentPart = 
+  | string
+  | TextPart
+  | ImagePart
+  | FilePart
+  | ReasoningPart
+  | ToolCallPart
+  | ToolResultPart
+  | ToolApprovalRequest
+  | ToolApprovalResponse;
+
+// --- AI Vision Pipeline Data Structures ---
+/**
+* Used in Stage 1A (Discovery) to identify where labels are located.
+*/
 export interface ZoneLabel {
   roomName: string;
   labelCoordinates: { x: number; y: number };
 }
 
+/**
+* The structured output from Stage 1A.
+*/
 export interface DiscoveryResult {
   layout_reasoning: string;
   scaleText: string | null;
   zones: ZoneLabel[];
+  confidenceScore?: number;
+  processingTime?: number;
 }
 
-// THE FIX IS HERE
+/**
+* Used in Stage 1B (Analysis) and 1C (Circulation) to define room geometry.
+*/
 export interface ZoneAnnotation {
   roomName: string;
   boundingBox: [number, number, number, number]; // [xmin, ymin, xmax, ymax]
   dimensionsText?: string | null;
-  reasoning?: string | null; // Changed to allow null
+  reasoning?: string | null;
+  confidenceScore?: number;
+  widthFeet?: number;
+  type?: 'hallway' | 'foyer' | 'corridor' | 'room';
+  connectivityScore?: number;
+  connectedRooms?: string[];
 }
 
+/**
+* The intermediate object passed from the Vision stages to the Calculator.
+*/
 export interface AnnotationResult {
   scaleAnnotation?: {
     text?: string;
     pixelLength?: number;
     pixelsPerFoot?: number;
+    confidence?: number;
   };
   rooms: ZoneAnnotation[];
-  windows?: {
-    boundingBox: [number, number, number, number];
-  }[];
 }
 
+/**
+* Zod Schema for the final AI Takeoff.
+* Used by Vercel AI SDK for strict output enforcement.
+*/
 export const VisionTakeoffResultSchema = z.object({
   vision_reasoning: z.string().optional(),
   math_trace: z.string().optional(),
   metadata: z.object({
     jobName: z.string().optional(),
-    client: z.string().optional()
+    client: z.string().optional(),
+    status: z.string().optional()
   }).optional(),
   rooms: z.array(z.object({
     name: z.string().min(1, "Room name cannot be empty"),
-    area: z.number().gt(0, "Room area must be greater than zero"), 
+    area: z.number().gt(0, "Area must be positive"),
     windows: z.number().optional(),
     orientation: z.string().optional(),
-    isConditioned: z.boolean().optional()
-  })).min(1, "The rooms array cannot be empty. Vision AI failed to detect conditioned zones."),
+    isConditioned: z.boolean().describe("True if the space is heated/cooled (Living, Bed, Kitchen), False for Garage/Patio/Porch"),
+    confidenceScore: z.number().min(0).max(100).optional()
+  })).min(1, "The rooms array cannot be empty."),
   construction: z.object({
     wallType: z.string().optional(),
     windowType: z.string().optional()
   }).optional(),
   totalEnvelope: z.object({
-     conditionedFloorArea: z.number().gt(50, "Total area too small")
+    conditionedFloorArea: z.number().gt(50, "Conditioned area is too small for a residence"),
+    grossTotalArea: z.number().optional().describe("Total footprint including unconditioned spaces like Garage/Porch"),
+    scaleConfidence: z.number().min(0).max(100).optional()
   }),
-  error: z.string().optional()
+  error: z.string().optional(),
+  processingMetrics: z.object({
+    totalDuration: z.number().optional(),
+    stageDurations: z.record(z.number()).optional()
+  }).optional()
 });
 
 export type VisionTakeoffResult = z.infer<typeof VisionTakeoffResultSchema>;
 
-
 // --- Core Application State & Engineering Data Structures ---
-
+/**
+* The primary state object for the entire HVAC Compliance Engine.
+*/
 export interface ProjectState {
   id: string;
   metadata: ProjectMetadata;
@@ -82,9 +169,9 @@ export interface ProjectState {
     aed: AEDExcursion;
     multiOrientation: OrientationLoad[];
   };
-  status: 'COMPLETE';
+  status: 'COMPLETE' | 'PROCESSING' | 'ERROR';
   processingMetrics?: { calculationTime: number };
-  visionRawData?: AnnotationResult;
+  visionRawData?: AnnotationResult; // Stores raw coordinates for visual audit view
 }
 
 export interface ProjectMetadata {
@@ -93,6 +180,7 @@ export interface ProjectMetadata {
   clientCompany?: string;
   designerName: string;
   reportDate: string;
+  pipelineMetrics?: PipelineMetrics;
 }
 
 export interface DesignConditions {
@@ -102,18 +190,18 @@ export interface DesignConditions {
     latitude: number;
     elevation: number;
   };
-  heating: { 
-      outdoorDB: number; 
-      indoorDB: number; 
-      designTD?: number;
+  heating: {
+    outdoorDB: number;
+    indoorDB: number;
+    designTD?: number;
   };
-  cooling: { 
-      outdoorDB: number; 
-      indoorDB: number; 
-      outdoorWB?: number; 
-      indoorRH?: number; 
-      dailyRange: 'L' | 'M' | 'H'; 
-      designTD?: number;
+  cooling: {
+    outdoorDB: number;
+    indoorDB: number;
+    outdoorWB?: number;
+    indoorRH?: number;
+    dailyRange: 'L' | 'M' | 'H';
+    designTD?: number;
   };
   moistureDiff?: number;
   infiltration?: { method: string; quality?: string };
@@ -154,13 +242,13 @@ export interface Surface {
 }
 
 export interface ClimateConditions {
-    outdoorTempWinter: number;
-    outdoorTempSummer: number;
-    indoorTempWinter: number;
-    indoorTempSummer: number;
-    dailyRange: 'L'|'M'|'H';
-    latitude: number;
-    orientation: string;
+  outdoorTempWinter: number;
+  outdoorTempSummer: number;
+  indoorTempWinter: number;
+  indoorTempSummer: number;
+  dailyRange: 'L'|'M'|'H';
+  latitude: number;
+  orientation: string;
 }
 
 export interface ManualJInput {
@@ -244,7 +332,7 @@ export interface EquipmentDetails {
 }
 
 export interface ManualSResult {
-  status: 'Pass' | 'Fail: Undersized' | 'Fail: Oversized' | 'Warning: SHR Mismatch';
+  status: 'Pass' | 'Fail: Undersized' | 'Fail: Oversized' | 'Warning: SHR Mismatch' | 'Fail';
   totalCapacityRatio: number;
   sensibleCapacityRatio: number;
   heatingCapacityRatio: number;
@@ -281,18 +369,57 @@ export interface ManualTRegisterResult {
   status?: 'Pass' | 'Fail: Noisy' | 'Fail: Poor Throw';
 }
 
-export interface AEDExcursion { 
-    hourlyLoads: number[];
-    maxExcursionPercent: number;
-    limitPercent: number;
-    status: 'Pass' | 'Fail';
+export interface AEDExcursion {
+  hourlyLoads: number[];
+  maxExcursionPercent: number;
+  limitPercent: number;
+  status: 'Pass' | 'Fail';
 }
 
 export interface OrientationLoad {
-    direction: string;
-    sensible: number;
-    latent: number;
-    total: number;
-    heatingCFM: number;
-    coolingCFM: number;
+  direction: string;
+  sensible: number;
+  latent: number;
+  total: number;
+  heatingCFM: number;
+  coolingCFM: number;
+}
+
+// --- ENHANCED ERROR HANDLING TYPES (NEW) ---
+export interface AIFailureDetails {
+  stage: string;
+  attempts: number;
+  lastError: string;
+  timestamp: string;
+}
+
+export interface PipelineStageMetrics {
+  duration: number;
+  [key: string]: any;
+}
+
+export interface PipelineError {
+  stage: string;
+  message: string;
+  timestamp: string;
+  attempts?: number;
+  provider?: string;
+}
+
+export interface PipelineWarning {
+  message: string;
+  timestamp: string;
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+export interface PipelineMetrics {
+  pipelineId: string;
+  stages: Record<string, PipelineStageMetrics>;
+  totalDuration: number;
+  errors: PipelineError[];
+  warnings: PipelineWarning[];
+  pipelineStatus: 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'PARTIAL_SUCCESS';
+  aiProvider?: string;
+  modelUsed?: string;
+  retryCount?: number;
 }

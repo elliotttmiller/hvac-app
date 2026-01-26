@@ -1,5 +1,5 @@
 import { ProjectState } from '../types';
-import { runVisionStage } from './ai/geminiService';
+import { runVisionStage } from './ai/aiService';
 import { rasterizePdfToParts } from './pdfProcessor';
 
 export class PipelineOrchestrator {
