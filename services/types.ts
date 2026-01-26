@@ -13,11 +13,12 @@ export interface DiscoveryResult {
   zones: ZoneLabel[];
 }
 
+// THE FIX IS HERE
 export interface ZoneAnnotation {
   roomName: string;
   boundingBox: [number, number, number, number]; // [xmin, ymin, xmax, ymax]
   dimensionsText?: string | null;
-  reasoning?: string;
+  reasoning?: string | null; // Changed to allow null
 }
 
 export interface AnnotationResult {
@@ -44,7 +45,7 @@ export const VisionTakeoffResultSchema = z.object({
     area: z.number().gt(0, "Room area must be greater than zero"), 
     windows: z.number().optional(),
     orientation: z.string().optional(),
-    isConditioned: z.boolean().optional() // ADDED: Unambiguous conditioning flag
+    isConditioned: z.boolean().optional()
   })).min(1, "The rooms array cannot be empty. Vision AI failed to detect conditioned zones."),
   construction: z.object({
     wallType: z.string().optional(),
